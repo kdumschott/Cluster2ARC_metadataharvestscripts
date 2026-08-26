@@ -12,7 +12,9 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# How ARCtrl/python are made available on this cluster.
+# How ARCtrl/python are made available on this cluster. arctrl currently
+# only works inside this venv (a different Python version is on the rest
+# of the cluster).
 # ---------------------------------------------------------------------------
 ARCTRL_VENV="/mnt/bin/arctrl/arctrl_v3.1.0-venv"
 source "${ARCTRL_VENV}/bin/activate"
@@ -40,12 +42,63 @@ RUN_DIR="${RUN_DIR:-/path/to/ont_run_output}"
 ARC_PATH="${ARC_PATH:-/path/to/your/arc}"
 ASSAY_NAME="${ASSAY_NAME:-my_assay}"
 
-# Embedded ENA "Raw sequencing reads" Swate template, decoded to a temp file
-# for this run and cleaned up on exit.
-ENA_TEMPLATE="$(mktemp --suffix=.xlsx)"
-trap 'rm -f "${ENA_TEMPLATE}"' EXIT
 
-base64 -d > "${ENA_TEMPLATE}" <<'B64EOF'
+echo "started ont_harvest run of ${ASSAY_NAME}/$(basename "${RUN_DIR}") at ${SECONDS} seconds"
+
+"${PYTHON}" - \
+    --run-dir "${RUN_DIR}" \
+    --arc-path "${ARC_PATH}" \
+    --assay-name "${ASSAY_NAME}" <<'PYEOF'
+"""Harvest metadata from an Oxford Nanopore (ONT/MinKNOW) run output directory
+and write it into a DataPLANT ARC's ISA assay table (isa.assay.xlsx) using ARCtrl.
+
+Reads only the small, structured MinKNOW files:
+  - final_summary_*.txt   (run/flow-cell/instrument metadata, file counts)
+  - sample_sheet_*.csv    (per-sample flow cell product code / kit / sample IDs)
+
+Deliberately does NOT parse report.json / report.md / report_*.html /
+sequencing_summary.txt (the latter can be tens of GB and holds per-read
+data, not run metadata).
+
+Writes TWO sheets into the assay's isa.assay.xlsx:
+  - "Reads"           the fields from DataPLANT's official ENA - Raw sequencing
+                       reads Swate template (embedded in this script) that
+                       map onto ONT run metadata: Input [Sample Name], the
+                       sequencing platform, and library layout (always
+                       "single-end" for nanopore sequencing).
+  - "run_information"  everything else harvested from the ONT output files that
+                       has no home in the ENA template.
+
+One row per sample_sheet.csv row (handles both single-sample and multiplexed/
+barcoded runs). Re-running for the same run directory updates matching rows in
+place instead of duplicating them, keyed on sample name (run_information is
+additionally keyed on the ONT run ID, since "Reads" has no run-id column).
+"""
+
+import argparse
+import base64
+import csv
+import glob
+import os
+import sys
+import tempfile
+
+from arctrl import (
+    ArcTable,
+    CompositeCell,
+    CompositeHeader,
+    IOType,
+    OntologyAnnotation,
+    XlsxController,
+)
+
+ENA_TABLE_NAME = "Reads"
+RUN_INFO_TABLE_NAME = "run_information"
+
+# Bundled ENA "Raw sequencing reads" Swate template, base64-encoded so the
+# whole harvester -- including this data asset -- is a single self-contained
+# file. Decoded to a temp file on demand by load_ena_reads_table() below.
+ENA_TEMPLATE_B64 = """
 UEsDBAoAAAAIAOxpU1oNzuckagEAAPgFAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbMVUy27CMBC8
 9ysiX1Fi4FBVFYFDaY8tUukHLPGGWDi2ZZvX33djKKoqIEJE6iWr2LMzs2t7R5NdrZINOi+Nztkg
 67MEdWGE1Mucfc3f0ieW+ABagDIac7ZHzybjh9F8b9EnlKx9zqoQ7DPnvqiwBp8Zi5p2SuNqCPTr
@@ -224,59 +277,7 @@ QwMAABAAAAAAAAAAAAAAAAAAaB0AAGRvY1Byb3BzL2FwcC54bWxQSwECFAAKAAAACADsaVNaEvpy
 fl8BAADjAgAAEQAAAAAAAAAAAAAAAAAgHwAAZG9jUHJvcHMvY29yZS54bWxQSwECFAAKAAAACADs
 aVNax5YtuGwBAAC0AgAADwAAAAAAAAAAAAAAAACuIAAAeGwvd29ya2Jvb2sueG1sUEsFBgAAAAAV
 ABUAGQUAAEciAAAAAA==
-B64EOF
-
-
-echo "started ont_harvest run of ${ASSAY_NAME}/$(basename "${RUN_DIR}") at ${SECONDS} seconds"
-
-"${PYTHON}" - \
-    --run-dir "${RUN_DIR}" \
-    --arc-path "${ARC_PATH}" \
-    --assay-name "${ASSAY_NAME}" \
-    --ena-template "${ENA_TEMPLATE}" <<'PYEOF'
-"""Harvest metadata from an Oxford Nanopore (ONT/MinKNOW) run output directory
-and write it into a DataPLANT ARC's ISA assay table (isa.assay.xlsx) using ARCtrl.
-
-Reads only the small, structured MinKNOW files:
-  - final_summary_*.txt   (run/flow-cell/instrument metadata, file counts)
-  - sample_sheet_*.csv    (per-sample flow cell product code / kit / sample IDs)
-and locates the MinKNOW HTML report (report_*.html) to link (not parse).
-
-Deliberately does NOT parse report.json / report.md / sequencing_summary.txt
-(the latter can be tens of GB and holds per-read data, not run metadata).
-
-Writes TWO sheets into the assay's isa.assay.xlsx:
-  - "Reads"           the fields from DataPLANT's official ENA - Raw sequencing
-                       reads Swate template (passed in via --ena-template) that
-                       map onto ONT run metadata: Input [Sample Name], the
-                       sequencing platform, and library layout (always
-                       "single-end" for nanopore sequencing).
-  - "run_information"  everything else harvested from the ONT output files that
-                       has no home in the ENA template.
-
-One row per sample_sheet.csv row (handles both single-sample and multiplexed/
-barcoded runs). Re-running for the same run directory updates matching rows in
-place instead of duplicating them, keyed on sample name (run_information is
-additionally keyed on the ONT run ID, since "Reads" has no run-id column).
 """
-
-import argparse
-import csv
-import glob
-import os
-import sys
-
-from arctrl import (
-    ArcTable,
-    CompositeCell,
-    CompositeHeader,
-    IOType,
-    OntologyAnnotation,
-    XlsxController,
-)
-
-ENA_TABLE_NAME = "Reads"
-RUN_INFO_TABLE_NAME = "run_information"
 
 # Exact header text expected in the bundled ENA template's "Reads" table, in
 # column order. Checked at runtime so a template update that changes columns
@@ -295,8 +296,18 @@ EXPECTED_ENA_HEADERS = [
 
 # ---------------------------------------------------------------------------
 # ONT flow cell product code (+ instrument hostname, to disambiguate flow
-# cells that run on more than one instrument)
+# cells that run on more than one instrument) -> platform, with an OBI term
+# per Ontology_terms_outputsheetheadings.ods.
 #
+# Flongle is deliberately NOT treated as a fourth platform: it's an adapter/
+# flow-cell format run on a MinION or GridION, not a sequencer instrument in
+# its own right (no OBI/EFO term exists for it either -- GENEPIO:0004433 is
+# the only match anywhere, and its own definition flags it as "a placeholder
+# pending replacement by an appropriate term from another ontology"). So
+# FLO-FLG flow cells resolve to whichever real instrument ran them, same as
+# FLO-MIN below; the Flongle fact itself is still captured, just under
+# Parameter [flow cell product code] in run_information rather than forced
+# into this instrument-model concept.
 # ---------------------------------------------------------------------------
 PLATFORM_TERMS = {
     "PromethION": ("Oxford Nanopore PromethION", "OBI", "OBI:0002752"),
@@ -396,7 +407,11 @@ def passthrough_cell(value):
 # ---------------------------------------------------------------------------
 # "run_information" column definitions: (header, value_key, cell_factory)
 # ---------------------------------------------------------------------------
-
+# Column names use the ontology term's own preferred label (e.g. NCIT:C117058's
+# label "Run Identifier") wherever a term is attached, rather than a
+# custom-invented phrase, so the header text matches what the term actually
+# is called. Columns with no matching ontology term keep a plain descriptive
+# name since there's no term label to take it from.
 RUN_INFO_COLUMN_DEFS = [
     (CompositeHeader.input(IOType.sample()), "sample_name", free_text_cell),
     (CompositeHeader.protocol_ref(), "_blank", blank_free_text_cell),
@@ -417,7 +432,7 @@ RUN_INFO_COLUMN_DEFS = [
 ]
 
 
-def build_run_info_values(summary, sample_row, report_html):
+def build_run_info_values(summary, sample_row):
     sample_name = sample_row.get("sample_id") or sample_row.get("experiment_id") or summary.get("sample_id", "")
     run_id = sample_row.get("protocol_run_id") or summary.get("protocol_run_id", "")
     start_date, start_time = split_datetime(summary.get("started", ""))
@@ -540,8 +555,19 @@ def upsert_row(table, column_defs, values, key_fields):
     return "appended"
 
 
-def load_ena_reads_table(ena_template_path):
-    template_assay = XlsxController.Assay().from_xlsx_file(ena_template_path)
+def load_ena_reads_table():
+    """Decode the embedded ENA template to a temp file, load its 'Reads'
+    table structure, then remove the temp file -- it's only needed for this
+    one read."""
+    raw_bytes = base64.b64decode(ENA_TEMPLATE_B64)
+    fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(raw_bytes)
+        template_assay = XlsxController.Assay().from_xlsx_file(tmp_path)
+    finally:
+        os.remove(tmp_path)
+
     template_table = template_assay.GetTable(ENA_TABLE_NAME)
     actual_headers = [str(h) for h in template_table.Headers]
     if actual_headers != EXPECTED_ENA_HEADERS:
@@ -563,7 +589,6 @@ def main():
     parser.add_argument("--run-dir", required=True, help="Path to the ONT/MinKNOW run output directory")
     parser.add_argument("--arc-path", required=True, help="Path to the target ARC root directory")
     parser.add_argument("--assay-name", required=True, help="Name of the assay under <arc-path>/assays/<assay-name>")
-    parser.add_argument("--ena-template", required=True, help="Path to the bundled ENA 'Raw sequencing reads' Swate template xlsx")
     parser.add_argument("--dry-run", action="store_true", help="Parse and print what would be written, without touching the ARC")
     args = parser.parse_args()
 
@@ -581,8 +606,8 @@ def main():
 
     summary = parse_final_summary(final_summary_matches[0])
     sample_rows = parse_sample_sheet(sample_sheet_matches[0])
-   
-    run_info_rows = [build_run_info_values(summary, row,) for row in sample_rows]
+
+    run_info_rows = [build_run_info_values(summary, row) for row in sample_rows]
     ena_rows = [build_ena_values(summary, row, ri) for row, ri in zip(sample_rows, run_info_rows)]
 
     if args.dry_run:
@@ -601,7 +626,7 @@ def main():
     reads_table = assay.TryGetTable(ENA_TABLE_NAME)
     reads_is_new = reads_table is None
     if reads_is_new:
-        reads_table = load_ena_reads_table(args.ena_template)
+        reads_table = load_ena_reads_table()
 
     results = []
     for values, ena_values in zip(run_info_rows, ena_rows):
