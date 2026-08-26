@@ -12,9 +12,7 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# How ARCtrl/python are made available on this cluster. arctrl currently
-# only works inside this venv (a different Python version is on the rest
-# of the cluster).
+# How ARCtrl/python are made available on this cluster.
 # ---------------------------------------------------------------------------
 ARCTRL_VENV="/mnt/bin/arctrl/arctrl_v3.1.0-venv"
 source "${ARCTRL_VENV}/bin/activate"
@@ -297,18 +295,8 @@ EXPECTED_ENA_HEADERS = [
 
 # ---------------------------------------------------------------------------
 # ONT flow cell product code (+ instrument hostname, to disambiguate flow
-# cells that run on more than one instrument) -> platform, with an OBI term
-# per Ontology_terms_outputsheetheadings.ods.
+# cells that run on more than one instrument)
 #
-# Flongle is deliberately NOT treated as a fourth platform: it's an adapter/
-# flow-cell format run on a MinION or GridION, not a sequencer instrument in
-# its own right (no OBI/EFO term exists for it either -- GENEPIO:0004433 is
-# the only match anywhere, and its own definition flags it as "a placeholder
-# pending replacement by an appropriate term from another ontology"). So
-# FLO-FLG flow cells resolve to whichever real instrument ran them, same as
-# FLO-MIN below; the Flongle fact itself is still captured, just under
-# Parameter [flow cell product code] in run_information rather than forced
-# into this instrument-model concept.
 # ---------------------------------------------------------------------------
 PLATFORM_TERMS = {
     "PromethION": ("Oxford Nanopore PromethION", "OBI", "OBI:0002752"),
@@ -414,11 +402,7 @@ def passthrough_cell(value):
 # ---------------------------------------------------------------------------
 # "run_information" column definitions: (header, value_key, cell_factory)
 # ---------------------------------------------------------------------------
-# Column names use the ontology term's own preferred label (e.g. NCIT:C117058's
-# label "Run Identifier") wherever a term is attached, rather than a
-# custom-invented phrase, so the header text matches what the term actually
-# is called. Columns with no matching ontology term keep a plain descriptive
-# name since there's no term label to take it from.
+
 RUN_INFO_COLUMN_DEFS = [
     (CompositeHeader.input(IOType.sample()), "sample_name", free_text_cell),
     (CompositeHeader.protocol_ref(), "_blank", blank_free_text_cell),
