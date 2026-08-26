@@ -342,12 +342,6 @@ def parse_sample_sheet(path):
         return [row for row in reader]
 
 
-def find_report_html(run_dir):
-    """Locate the top-level MinKNOW HTML report (report_*.html) in run_dir."""
-    matches = sorted(glob.glob(os.path.join(run_dir, "report_*.html")))
-    return matches[0] if matches else None
-
-
 def yes_no(flag_value):
     return "Yes" if str(flag_value).strip() == "1" else "No"
 
@@ -420,7 +414,6 @@ RUN_INFO_COLUMN_DEFS = [
     (CompositeHeader.parameter(OntologyAnnotation("basecalling enabled")), "basecalling_enabled", term_cell),
     (CompositeHeader.parameter(OntologyAnnotation("pod5 file count")), "pod5_file_count", term_cell),
     (CompositeHeader.parameter(OntologyAnnotation("fastq file count")), "fastq_file_count", term_cell),
-    (CompositeHeader.comment("ONT Sequencing Report (HTML)"), "report_html", free_text_cell),
 ]
 
 
@@ -446,7 +439,6 @@ def build_run_info_values(summary, sample_row, report_html):
         "basecalling_enabled": yes_no(summary.get("basecalling_enabled", "0")),
         "pod5_file_count": summary.get("pod5_files_in_final_dest", ""),
         "fastq_file_count": summary.get("fastq_files_in_final_dest", ""),
-        "report_html": os.path.basename(report_html) if report_html else "",
     }
 
 
@@ -589,11 +581,8 @@ def main():
 
     summary = parse_final_summary(final_summary_matches[0])
     sample_rows = parse_sample_sheet(sample_sheet_matches[0])
-    report_html = find_report_html(run_dir)
-    if report_html is None:
-        print(f"Warning: no report_*.html found in {run_dir}; report link will be left blank", file=sys.stderr)
-
-    run_info_rows = [build_run_info_values(summary, row, report_html) for row in sample_rows]
+   
+    run_info_rows = [build_run_info_values(summary, row,) for row in sample_rows]
     ena_rows = [build_ena_values(summary, row, ri) for row, ri in zip(sample_rows, run_info_rows)]
 
     if args.dry_run:
