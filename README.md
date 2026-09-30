@@ -1,6 +1,12 @@
-## Metadata2ARCassay_ONT
+## Cluster Metadata to ARC isa sheets
 
-A semi-automated metadata harvesting pipeline to extract relevant information from ONT sequencing run reports and annotate ARC assay metadata tables.
+This repository contains scripts for extracting metadata for annotation of ARC studies and assays
+
+
+
+### Metadata2ARCassay_ONT
+
+A script to extract relevant information from ONT sequencing run reports and annotate ARC assay metadata tables.
 
 #### To run
 
