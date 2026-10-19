@@ -3,4 +3,5 @@
 This repository contains scripts for transcribing metadata from the cluster to ARC study and assay isa.xlsx files.
 
 ##### Available scripts:
-[ONT run report metadata to ARC assay](https://github.com/usadellab/ClustertoARC_metadataharvestscripts/blob/master/ONT/README.md#ont-run-report-metadata-to-arc-assay)
+[ONT run report metadata to ARC assay](https://github.com/usadellab/ClustertoARC_metadataharvestscripts/blob/master/ONT/README.md#ont-run-report-metadata-to-arc-assay) \
+[PacBio (Revio/Sequel) outputs to ARC assay](https://github.com/usadellab/ClustertoARC_metadataharvestscripts/blob/master/PacBio/README.md))
